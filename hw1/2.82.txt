@@ -1,0 +1,29 @@
+A. (x<y) == (-x>-y) 
+No, in the situation that x = INT_MIN, y = 0, -x would still equal to INT_MIN because of the arthmetic of two's
+complement (range of int in 32bit system is -2^31 ~ 2^31-1). For example, negative of 1000 would be 0111 + 1 which is 1000
+itself. Therefore the value of -x would be same as x, thus -x is less than -y.
+
+B. ((x+y)<<4) + y-x == 17*y+15*x
+Yes. (x+y)<<4 == (x+y)*2^4 == x*2^4 + y*2^4 == 16*x + 16*y, then ((x+y)<<4) + y-x == 17*y + 15*x. In two's complement, 
+the higher bits that out of range will be ignored if overflow happen, thus, no matter x+y, 16x+16y etc. are more than
+32 bits or not, the final result would be the least 32 bits. Therefore the result of left hand side and right hand side 
+would always be same. (ring properties)
+
+C. ~x + ~y + 1 == ~(x+y)
+Yes, ~x + ~y +1 == -x-1 + -y-1 + 1 = -(x+y) - 1 = ~(x+y) which equal to right hand side. Overflow dose not matter since
+the ring properties.
+
+D. (ux-uy) ==-(unsigned) (y-x)
+No. For example in a 4bit system, let x = 1111 = -1 in decimal, y = 1000 = -8 in decimal, then ux = 1111 = 15, uy = 1000 = 8
+so ux-uy = 7, y-x = -7 = 1001, however, -(unsigned)(y-x) = -(1001) = -9 which is not equal to 7. This is because (unsigned)
+operator mess up the first sign bit.
+
+E. ((x >> 2) << 2) <= x
+Yes. Since right switch first, the sign would not change. And left switch always add zeros, therefore no matter x is positive
+or negative, ((x >> 2) << 2) <= x is always true.
+
+F. x >> 1 == (ux >> 1) + (ux & (-1 << 31))
+No. Let x = 10000...00, x >> 1 = 11000...00 which is negative, however right hand side are always positive.
+
+G. x % 128 == (x & 127)
+No. Let x = -1 = 11111....111, x % 128 = -1, x & 127 = 127, left hand side is not equal to right hand side.

@@ -1,0 +1,10 @@
+A. sizeof operator return a value of type size_t, which is an unsigned type value. This will cause the 
+return type of maxbytes-sizeof(val) to be unsigned. Therefore, in the situation that maxbytes is less
+than sizeof(val), the negative result will become a large positive value since it's unsigned type. Thus
+maxbytes-sizeof(val) would never be negative.
+
+B. 
+void copy_int(int val; void *buf, int maxbytes) {
+if (maxbytes > 0 && maxbytes >= sizeof(val))
+   memcpy(buf, (void*) &val, sizeof(val));
+}
