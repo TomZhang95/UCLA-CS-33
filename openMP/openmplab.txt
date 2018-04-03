@@ -1,0 +1,203 @@
+I first compiled the program normally with gprof option enable, and check the portion 
+of time use:
+
+$ make seq GPROF=1
+$ ./seq
+FUNC TIME : 0.565249
+TOTAL TIME : 2.530552
+
+$ gprof seq
+Flat profile:
+
+Each sample counts as 0.01 seconds.
+  %   cumulative   self              self     total           
+ time   seconds   seconds    calls  ms/call  ms/call  name    
+ 62.38      0.38     0.38       15    25.37    26.95  func1
+ 20.52      0.51     0.13  5177344     0.00     0.00  rand2
+  4.92      0.54     0.03        1    30.04   131.44  addSeed
+  3.28      0.56     0.02                             sequence
+  1.64      0.57     0.01   491520     0.00     0.00  findIndexBin
+  1.64      0.58     0.01       15     0.67     0.67  func2
+  1.64      0.59     0.01       15     0.67     1.34  func5
+  1.64      0.60     0.01        1    10.01    10.01  imdilateDisk
+  1.64      0.61     0.01                             filter
+  0.82      0.61     0.01       15     0.33     0.33  rand1
+  0.00      0.61     0.00   983042     0.00     0.00  round
+  0.00      0.61     0.00       16     0.00     0.00  dilateMatrix
+  0.00      0.61     0.00       15     0.00     0.00  func3
+  0.00      0.61     0.00       15     0.00     0.00  func4
+  0.00      0.61     0.00        2     0.00     0.00  get_time
+  0.00      0.61     0.00        1     0.00     0.00  elapsed_time
+  0.00      0.61     0.00        1     0.00     0.00  fillMatrix
+  0.00      0.61     0.00        1     0.00     0.00  func0
+  0.00      0.61     0.00        1     0.00     0.00  getNeighbors
+
+I see that most of the time is spending on func1 which is declared func.c.
+
+However, when I tried to compile and run it normally without gprof, it shows the run time
+is shorter than the one compiled with gprof:
+$ make seq
+$ ./seq
+FUNC TIME : 0.513757
+TOTAL TIME : 2.401078
+
+
+Therefore I got the a result that if compare the run time between omp and seq, I have to
+compile them without gprof enable since gprof support takes extra time and would make the 
+result not accurate.
+
+
+Then I included omp.h in func.c to enable openMP, and add "#pragma omp parallel for num_threads(8)"
+before the for loop in func0.(I tried few number of threads but I found 8 is the maximum number of
+thread to speedup, any number larger than 8 would remain the same speedup, this probably because the 
+SeasNet server07 only allow 8 threads at most.) 
+Then I compiled it with omp option:
+
+$ make omp
+$ ./omp
+FUNC TIME : 0.492198
+TOTAL TIME : 2.422166
+It does a little improvement but not so much.
+
+Then I looked up the func1, func1 has 2 independent for loop, and one of them is a nested for
+loop. The first one is easy to change to parallelism since all operations are independent so just
+need to add "#pragma omp parallel for num_threads(8)" before the for loop. 
+For the nested for loop:
+					  index_X = round(arrayX[i]) + objxy[j*2 + 1];
+                        index_Y = round(arrayY[i]) + objxy[j*2];
+                        index[i*Ones + j] = fabs(index_X*Y*Z + index_Y*Z + iter);
+the variables index_X, index_Y, are use in the third line, therefore we need to make them private,
+also need to do the same to j since there are two for loops using j inside it, and they have to
+use their own j value. Thus, add "#pragma omp parallel for num_threads(8) private(index_X, index_Y, j)"
+on the top of the outer for loop.
+Compile and run:
+$ make omp
+$ ./omp
+FUNC TIME : 0.106816
+TOTAL TIME : 2.028618
+
+The performance got a huge speed up, which is about 5.1x
+
+Compile with gprof and see which part is bottleneck for now:
+$ make omp GPROF=1
+$ gprof omp
+Flat profile:
+
+Each sample counts as 0.01 seconds.
+  %   cumulative   self              self     total           
+ time   seconds   seconds    calls  ms/call  ms/call  name    
+ 67.30      0.41     0.41        1   410.55   423.34  filter
+ 14.77      0.50     0.09                             func2
+  6.57      0.54     0.04  6160401     0.00     0.00  func1
+  4.92      0.57     0.03        1    30.04    57.31  func5
+  1.64      0.58     0.01                             addSeed
+  1.64      0.59     0.01                             dilateMatrix
+  1.64      0.60     0.01                             imdilateDisk
+  1.64      0.61     0.01                             sequence
+  0.00      0.61     0.00   491520     0.00     0.00  getNeighbors
+  0.00      0.61     0.00       16     0.00     0.00  rand1
+  0.00      0.61     0.00        1     0.00     0.00  fillMatrix
+  0.00      0.61     0.00        1     0.00     0.00  func0
+  0.00      0.61     0.00        1     0.00     0.00  func4
+  0.00      0.61     0.00        1     0.00     0.00  init
+
+which shows filter but not so clear, so I looked on the call graph for function filter:
+ 
+		     Call graph (explanation follows)
+
+granularity: each sample hit covers 2 byte(s) for 1.64% of 0.61 seconds
+
+index % time    self  children    called     name
+                                  77             filter [1]
+                0.41    0.01       1/1           _start [2]
+[1]     69.3    0.41    0.01       1+77      filter [1]
+                0.01    0.00 1966095/6160401     func1 [6]
+                0.00    0.00  491520/491520      getNeighbors [12]
+                0.00    0.00       1/1           func0 [15]
+                                  77             filter [1]
+-----------------------------------------------
+
+which shows func2 and _start is the bottleneck now. However we cannot do anything about
+_start function, therefore I did the simple pragma to first and third for loop, but I added 
+"reduction" condition in the pragma for second for loop since the instruction is:
+for(i = 0; i < n; i++)
+                sumWeights += weights[i];
+which involve the reduction, and also because addition applied to associative law and 
+commutative law, so we can use "reduction" key word to apply parallelism to this for loop.
+$ make omp
+$ ./omp
+FUNC TIME : 0.092015
+TOTAL TIME : 2.028323
+which does have a little improvement.
+
+Now look up the gprof of omp executable again:
+$ make omp GPPROF=1
+$ gprof omp
+Flat profile:
+
+Each sample counts as 0.01 seconds.
+  %   cumulative   self              self     total           
+ time   seconds   seconds    calls  ms/call  ms/call  name    
+ 88.64      0.54     0.54  4194307     0.00     0.00  filter
+  4.92      0.57     0.03        1    30.04    30.04  func1
+  3.28      0.59     0.02                             fillMatrix
+  1.64      0.60     0.01        1    10.01    10.01  rand2
+  1.64      0.61     0.01                             imdilateDisk
+  0.00      0.61     0.00   491520     0.00     0.00  dilateMatrix
+  0.00      0.61     0.00       16     0.00     0.00  func4
+  0.00      0.61     0.00        1     0.00     0.00  elapsed_time
+  0.00      0.61     0.00        1     0.00     0.00  func2
+
+		     Call graph (explanation follows)
+
+granularity: each sample hit covers 2 byte(s) for 1.64% of 0.61 seconds
+
+index % time    self  children    called     name
+[1]     93.4    0.57    0.00       3+4685825 <cycle 1 as a whole> [1]
+                0.54    0.00 4194307+1966173     filter <cycle 1> [2]
+                0.03    0.00       1             func1 <cycle 1> [5]
+                0.00    0.00  491520             dilateMatrix <cycle 1> [10]
+-----------------------------------------------
+                             1966173             filter <cycle 1> [2]
+                             4194304             func1 <cycle 1> [5]
+                0.19    0.00       1/3           _start [4]
+                0.38    0.00       2/3           __gmon_start__ [3]
+[2]     88.5    0.54    0.00 4194307+1966173 filter <cycle 1> [2]
+                              491520             dilateMatrix <cycle 1> [10]
+                             1966173             filter <cycle 1> [2]
+-----------------------------------------------
+
+Now none of the functions in func.c is bottleneck anymore, and thus I am done with
+the speedup with func.c. Then I did the memory leak check and the correctness check:
+$ make check
+gcc -o omp  -O3 -fopenmp filter.c main.c func.c util.c -lm
+cp omp filter
+./filter
+FUNC TIME : 0.092296
+TOTAL TIME : 2.005362
+diff --brief correct.txt output.txt
+
+Which pass the correctness check.
+
+When I did the memory check, it shows some memory leak:
+$ make omp MTRACE=1
+$ ./omp
+$ make checkmem
+mtrace filter mtrace.out || true
+
+Memory not freed:
+-----------------
+           Address     Size     Caller
+0x00000000015af060    0xc00  at 0x7fecc4d0d869
+0x00000000015afc70     0xc0  at 0x7fecc4d0d869
+0x00000000015afd40     0x48  at 0x7fecc4d0d8b9
+0x00000000015afd90    0x240  at 0x7fecc523dc25
+0x00000000015affe0    0x240  at 0x7fecc523dc25
+0x00000000015b0230    0x240  at 0x7fecc523dc25
+0x00000000015b0480    0x240  at 0x7fecc523dc25
+0x00000000015b06d0    0x240  at 0x7fecc523dc25
+0x00000000015b0920    0x240  at 0x7fecc523dc25
+0x00000000015b0b70    0x240  at 0x7fecc523dc25
+Since I didn't use any malloc function and the bug of openMP shows in this URL:
+https://gcc.gnu.org/bugzilla/show_bug.cgi?id=36298
+There suppose no memory leak and I ignored the memory leak warning.

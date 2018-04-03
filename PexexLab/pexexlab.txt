@@ -1,0 +1,42 @@
+Gather instruction traces:
+
+1. Open the executable  with gdb:
+gdb ~eggert/bin64/bin/emacs-25.2
+
+2. Set break point at function Ftimes:
+(gdb) b Ftimes
+
+3. Set disassemble-next-line on to show disassembly code every time when I step in:
+(gdb) set disassemble-next-line on
+
+4. I searched through gdb man page and found that there is a log-remain feature in
+gdb that can make sure we don't accidently quit gdb and lost logs we get:
+(gdb) set logging on log.txt
+This will automatically record the output and put it in a file named log.txt 
+
+5. Run the executable with command: 
+(gdb) r -Q -batch -eval '(print (* 1250284240 -1844255039))'
+
+6. Using the step in function to execute instructions line by line, and get the 
+disassembly code for each instruction:
+(gdb) si
+
+7. Then for each time stepped in, I look check the value of registers which changed 
+by current instruction using:
+(gdb) i r registername
+
+The output is in format, which the second column of the output is the value of 
+register in hex, and third column is the value of register in decimal:
+(gdb) i r rdx
+rdx            0x7fffffffd760	140737488344928
+
+8. Then repeat step 6 and 7 to gather all the information.
+
+------------------------------------------------------------------------------
+Examine integer overflow handling:
+1. compile the textovf.c with commands:
+	1). gcc -S -O2 textovf.c
+	2). gcc -S -O2 -fwrapv textovf.c
+	3). gcc -S -O2 -fsanitize=undefined textovf.c
+
+2. Open each textovf.s.

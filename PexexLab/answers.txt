@@ -1,0 +1,73 @@
+1. The instruction:
+547920	8 8d 04 ad 02 00 00 00	lea    0x2(,%rbp,4),%rax	rax=7fffffff73ab3b42
+caused the overflow since %rbp=0xdfffffffdceaced0 before this instruction execute, and the multiplication makes
+ the value stored in %rbp overflow
+
+2. In the 3732 line in ~eggert/src/emacs-25.2/src/data.c:
+
+DEFVAR_LISP ("most-negative-fixnum", Vmost_negative_fixnum,
+	       doc: /* The smallest value that is representable in a Lisp integer.  */);
+  Vmost_negative_fixnum = make_number (MOST_NEGATIVE_FIXNUM);
+
+The value of "most-negative-fixnum" is equal to value of Vmost_negative_fixnum, which is equal to 
+MOST_NEGATIVE_FIXNUM, and MOST_NEGATIVE_FIXNUM is defined in lisp.h as:
+
+#define MOST_POSITIVE_FIXNUM (EMACS_INT_MAX >> INTTYPEBITS)
+#define MOST_NEGATIVE_FIXNUM (-1 - MOST_POSITIVE_FIXNUM)
+
+Where EMACS_INT_MAX is defined as LONG_MAX which is 0x7fffffffffffffff, and INTTYPEBITS is defined as 2 which
+as shown below:
+
+#define GCTYPEBITS 3
+
+INTTYPEBITS = GCTYPEBITS - 1
+
+Therefore "most-negative-fixnum" is equal to -1 - (0x7fffffffffffffff >> 2) which is -2305843009213693952
+
+3. The shell command: 
+emacs -Q -batch -eval '(print (* most-positive-fixnum most-positive-fixnum most-positive-fixnum most-positive-fixnum))'
+is printing the result of 4th power of most-positive-fixnum, where most-positive-fixnum is defined as:
+
+DEFVAR_LISP ("most-positive-fixnum", Vmost_positive_fixnum,
+               doc: /* The largest value that is representable in a Lisp integer.  */);
+  Vmost_positive_fixnum = make_number (MOST_POSITIVE_FIXNUM);
+
+From question #2 we knew that MOST_POSITIVE_FIXNUM = EMACS_INT_MAX >> INTTYPEBITS which is 0x1fffffffffffffff.
+The multiplication of this number would overflow for sure, and if there is overflow happen, emacs functions
+would AND the result with a variable called INTMASK which defined as:
+#define INTMASK (EMACS_INT_MAX >> (INTTYPEBITS - 1))
+which is 0x3fffffffffffffff, and the result of multiplication is 0xc000000000000001, therefore it output 1.
+
+4. With -fwrapv in compilation, the program will no longer deal with overflow problems. If there is any
+overflow happen, the program will still run as nothing happen. Therefore if some calculation overflowed, emacs
+will output the wrong result without any warning, and users would not know if there is any overflow happened. Further more, if some internal calculation overflowed when emacs is running, the program may crash since all
+overflow would be treat as "correct calculation".
+
+5. I first run the emacs with gdb and see which function went wrong:
+gdb emacs
+(gdb) r -Q -batch -eval '(print (format-time-string "%Y-%m-%d %H:%M:%S %Z" nil (concat (make-string 1000 ?X) "0")))'
+Then there is a error message shows:
+Program received signal SIGSEGV, Segmentation fault.
+0x00007ffff173949b in __strcpy_sse2_unaligned () from /lib64/libc.so.6
+Then I used command set disassemble-next-line on to enable disassembly code, and run the program again:
+(gdb) set disassemble-next-line on
+(gdb) r -Q -batch -eval '(print (format-time-string "%Y-%m-%d %H:%M:%S %Z" nil (concat (make-string 1000 ?X) "0")))'
+Some new information showed up:
+0x00007ffff173949b <__strcpy_sse2_unaligned+411>:	f3 0f 7f 7f f0	movdqu %xmm7,-0x10(%rdi)
+
+Then I tried to see what values are stored in %xmm7 and %rdi:
+(gdb) i r xmm7
+xmm7           {v4_float = {0x60000000, 0x60000000, 0x60000000, 0x60000000}, v2_double = {0x8000000000000000, 0x8000000000000000}, 
+  v16_int8 = {0x58 <repeats 16 times>}, v8_int16 = {0x5858, 0x5858, 0x5858, 0x5858, 0x5858, 0x5858, 0x5858, 0x5858}, v4_int32 = {0x58585858, 
+    0x58585858, 0x58585858, 0x58585858}, v2_int64 = {0x5858585858585858, 0x5858585858585858}, uint128 = 0x58585858585858585858585858585858}
+
+(gdb) i r rdi
+rdi            0x148800a	21528586
+
+Since the instruction is assigning value in %xmm7 into an address, then I tried to see what is stored in
+0x148800a - 10 which is 0x1488000:
+(gdb) x/x 0x1488000
+0x1488000:	Cannot access memory at address 0x1488000
+it shows that I cannot access the memory, which means that the program could not access the memory at address 
+0x1488000, and that is the cause of program crashing. I'm guessing maybe there are some calculation error or 
+assigning error with the value store in %rdi, and cause the value an illegal address.

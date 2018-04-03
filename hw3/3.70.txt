@@ -1,0 +1,13 @@
+A.
+e1.p = offset 0 byte
+e1.y = offset 8 byte
+e2.x = offset 0 byte (since each structure in same union all start at offset 0)
+e2.next = offset 8 byte
+
+B.
+Each structure needs 16 bytes, the union need total 32 bytes.
+
+C. 
+void proc (union ele* up) {
+     up->e2.x = *(up->e2.next->e1.p) - up->e2.next->e1.y;
+}

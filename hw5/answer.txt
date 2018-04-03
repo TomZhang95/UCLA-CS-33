@@ -1,0 +1,18 @@
+12.18:
+A. Unsafe
+B. Safe
+C. Unsafe
+
+12.24:
+ssize_t rio_readn(int fd, void *usrbuf, size_t n);
+ssize_t rio_writen(int fd, void *usrbuf, size_t n);
+These two are reentrant since they are not assign value to any global variables, it doesn't 
+use or return any static variable, and doesn't call any non-reentrant function.
+
+void rio_readinitb(rio_t *rp, int fd);
+static ssize_t rio_read(rio_t *rp, char *usrbuf, size_t n);
+These two are non-reentrant since they are modifying data in shared global data structure *rp.
+
+ssize_t rio_readlineb(rio_t *rp, void *usrbuf, size_t maxlen);
+ssize_t rio_readnb(rio_t *rp, void *usrbuf, size_t n);
+These two are non-reentrant since they are calling the non-reentrant function rio_read.

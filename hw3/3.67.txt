@@ -1,0 +1,53 @@
+A.
+|	   | <- %rbp
+|	   |
+|	   |
+|	   |
+|	   |
+|          | <-	64(%rsp)
+|     	   |
+|     	   |
+|          |
+|     	   |
+|     z    | <-	24(%rsp)
+|     &z   | <-	16(%rsp)
+|     y    | <- 8(%rsp)
+|     x    | <- %rsp      => *these <- means pointing to the starting point(lowest address) of an 8 bytes memory
+
+B. 
+In the C code, eval passed a strA structure s, in the machine code we see that the address of %rsp+64 is assigned to 
+%rdi, and the machine code of 'process' uses %rdi as an stack pointer to push values in. And we can see that eval does
+not pass s into process, but process are using stack pointer %rsp to access the value of each member in s. Therefore we can say that eval passes the stack pointer %rsp and it's respective offset to process.
+
+C. 
+After the call operation, %rsp will be subtracted 8 byte more to push the return address into stack, therefore the 
+code 'movq 24(%rsp), %rdx' is accessing the &z, and 'movq 16(%rsp), %rcx' is accesing y, and 'movq 8(%rsp), %rcx' is 
+accesing x.
+
+D.
+It stores %rcx which contains value y at this moment to (%rdi) which is actually 64(%rsp) by using instruction
+'movq %rcx, (%rdi)', then it store x to 72(%rsp) by instruction 'movq %rcx, 8(%rdi)', and it store z to 80(%rsp) 
+at the end by instruction 'movq %rcx, 16(%rdi)'
+
+E.
+|          | <- %rbp
+|          |
+|          |
+|     z    | <- 80(%rsp)
+|     x    | <- 72(%rsp)
+|     y    | <- 64(%rsp)
+|          |
+|          |
+|          |
+|     z    | <- 32(%rsp)
+|     &z   | <- 24(%rsp)
+|     y    | <- 16(%rsp)
+|     x    | <-	8(%rsp)
+| ret add  | <- %rsp
+
+eval uses the stack pointer %rsp to access the strB r, such as 80(%rsp), 64(%rsp)
+
+F. 
+Structure elements are passed as function argument by using stack pointer %rsp, the machine would not waste memory to
+store a copy of structure elements, but the address(or say offset) of those elements would be passed to functions, 
+then the function can access the elements of structure directly using stack pointer %rsp.
